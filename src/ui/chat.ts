@@ -86,6 +86,9 @@ export function renderChatActive(
       <div class="chat-messages" id="chatMessages">
         ${messagesHtml}
       </div>
+      <button id="scrollBottomBtn" class="scroll-bottom-btn" style="display:none" title="Scroll to bottom">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+      </button>
       <div class="chat-input-row">
         <div class="emoji-panel" id="emojiPanel" style="display:none">
           ${EMOJIS.map(e => `<button class="emoji-option" data-emoji="${e}">${e}</button>`).join("")}
@@ -106,7 +109,25 @@ export function renderChatActive(
   `;
 
   const messagesEl = container.querySelector("#chatMessages") as HTMLElement;
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  const scrollBtn = container.querySelector("#scrollBottomBtn") as HTMLElement;
+
+  const SCROLL_THRESHOLD = 200;
+
+  function isNearBottom(el: HTMLElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+  }
+
+  messagesEl.addEventListener("scroll", () => {
+    scrollBtn.style.display = isNearBottom(messagesEl) ? "none" : "flex";
+  });
+
+  if (isNearBottom(messagesEl)) {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  scrollBtn.addEventListener("click", () => {
+    messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: "smooth" });
+  });
 
   // Notification sound for new peer messages
   const msgs = session.messages;
