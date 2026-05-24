@@ -18,6 +18,32 @@ const EMOJIS = [
   "👋","🙌","👏","⭐","🌟","💫","⚡","🎊",
 ];
 
+let audioCtx: AudioContext | null = null;
+let lastNotifiedId: string | null = null;
+
+function playNotificationSound(): void {
+  try {
+    if (!audioCtx) {
+      audioCtx = new AudioContext();
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = "sine";
+    osc.frequency.value = 800;
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.15);
+  } catch {
+    // Audio unavailable -- silently skip
+  }
+}
+
 function escapeHtml(text: string): string {
   const div = document.createElement("div");
   div.textContent = text;
@@ -81,6 +107,16 @@ export function renderChatActive(
 
   const messagesEl = container.querySelector("#chatMessages") as HTMLElement;
   messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  // Notification sound for new peer messages
+  const msgs = session.messages;
+  if (msgs.length > 0) {
+    const last = msgs[msgs.length - 1];
+    if (last.sender === "peer" && last.id !== lastNotifiedId) {
+      lastNotifiedId = last.id;
+      playNotificationSound();
+    }
+  }
 
   const input = container.querySelector("#chatInput") as HTMLInputElement;
   input.focus();
