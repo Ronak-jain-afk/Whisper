@@ -314,15 +314,15 @@ export class Session {
     }
   };
 
-  confirmSasMatch(): void {
+  async confirmSasMatch(): Promise<void> {
     if (this.state.current !== "SAS_VERIFY") return;
     this.clearSasTimeout();
     if (this.secret && !this.cryptoKey) {
-      deriveKey(this.secret).then((key) => {
-        this.cryptoKey = key;
-      }).catch(() => {
+      try {
+        this.cryptoKey = await deriveKey(this.secret);
+      } catch {
         // Encryption unavailable — messages sent in plaintext
-      });
+      }
     }
     this.sessionStartTime = Date.now();
     this.state.transition("CHAT_ACTIVE");

@@ -43,8 +43,11 @@ export function renderSasVerify(
     </div>
   `;
 
-  container.querySelector("#sasMatchBtn")?.addEventListener("click", () => {
-    session.confirmSasMatch();
+  container.querySelector("#sasMatchBtn")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Initializing...";
+    await session.confirmSasMatch();
   });
 
   container.querySelector("#sasMismatchBtn")?.addEventListener("click", () => {
