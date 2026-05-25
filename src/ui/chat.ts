@@ -22,6 +22,15 @@ let audioCtx: AudioContext | null = null;
 let lastNotifiedId: string | null = null;
 let searchTerm = "";
 let typingDebounceId: ReturnType<typeof setTimeout> | null = null;
+let timerIntervalId: ReturnType<typeof setInterval> | null = null;
+
+function formatDuration(start: number): string {
+  const elapsed = Math.floor((Date.now() - start) / 1000);
+  const m = Math.floor(elapsed / 60).toString().padStart(2, "0");
+  const s = (elapsed % 60).toString().padStart(2, "0");
+  const h = Math.floor(elapsed / 3600).toString().padStart(2, "0");
+  return h === "00" ? `${m}:${s}` : `${h}:${m}:${s}`;
+}
 
 function playNotificationSound(): void {
   try {
@@ -106,20 +115,50 @@ export function renderChatActive(
   container: HTMLElement,
   session: Session
 ): void {
-  const messagesHtml = session.messages.map(renderMessage).join("");
+  const messagesHtml = session.messages.length > 0 
+    ? session.messages.map(renderMessage).join("")
+    : `
+      <div class="chat-empty-state">
+        <span class="manual-body" style="font-size: 0.8rem; opacity: 0.4;">
+          [ SYSTEM_LOG // SESSION_ESTABLISHED // CHANNEL_ENCRYPTED ]
+        </span>
+      </div>
+    `;
+
+  const sasPhrase = session.sas?.phrase ?? "SECURE_TUNNEL";
+  const isOnline = session.peerConnected;
 
   container.innerHTML = `
     <div class="screen chat-active">
       <div class="chat-header">
-        <span class="status-dot online"></span>
-        <span class="chat-header-text serif">Secure Conversation</span>
+        <div class="header-status">
+          <span class="status-dot ${isOnline ? "online" : "offline"}"></span>
+          <span class="status-label">${isOnline ? "PEER CONNECTED" : "CONNECTION LOST"}</span>
+        </div>
+        <div class="header-center">
+          <span class="chat-header-text serif">Secure Conversation</span>
+          <div class="session-timer" id="sessionTimer">SESSION 00:00</div>
+        </div>
         <div class="header-actions">
-          <button id="searchToggleBtn" class="btn-icon" title="Search messages">
+          <button id="searchToggleBtn" class="btn-icon header-btn" title="Search messages">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </button>
-          <button id="copyChatBtn" class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.7rem;">Copy</button>
+          <button id="copyChatBtn" class="btn-icon header-btn" title="Archive Chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
         </div>
       </div>
+      
+      <div class="session-info-strip" id="sessionInfoStrip">
+        <div class="session-info-content">
+          <span class="session-info-label">VERIFIED_SAS:</span>
+          <span class="session-info-value">${sasPhrase}</span>
+        </div>
+        <button id="sessionInfoToggle" class="session-info-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
+
       <div class="chat-search${searchTerm ? "" : ""}" id="chatSearch"${searchTerm ? "" : ' style="display:none"'}>
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="searchInput" type="text" placeholder="Search messages…" autocomplete="off" value="${escapeHtml(searchTerm)}" />
@@ -135,8 +174,6 @@ export function renderChatActive(
       </button>
       <div class="typing-indicator" id="typingIndicator"${session.peerTyping ? "" : ' style="display:none"'}>
         <span class="typing-dot"></span>
-        <span class="typing-dot"></span>
-        <span class="typing-dot"></span>
         <span class="typing-text">Peer is typing…</span>
       </div>
       <div class="chat-input-row">
@@ -144,15 +181,17 @@ export function renderChatActive(
           ${EMOJIS.map(e => `<button class="emoji-option" data-emoji="${e}">${e}</button>`).join("")}
         </div>
         <div class="chat-input-area">
-          <button id="emojiBtn" class="btn-icon" title="Emoji">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-          </button>
-          <button id="imageBtn" class="btn-icon" title="Send image">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-          </button>
-          <button id="fileBtn" class="btn-icon" title="Send file">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-          </button>
+          <div class="input-actions-group">
+            <button id="emojiBtn" class="btn-icon" title="Emoji">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            </button>
+            <button id="imageBtn" class="btn-icon" title="Send image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </button>
+            <button id="fileBtn" class="btn-icon" title="Send file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            </button>
+          </div>
           <input id="chatInput" type="text" placeholder="Whisper something…" autocomplete="off" />
           <button id="sendBtn" class="btn-primary" style="padding: 0.6rem 1.2rem;">Send</button>
         </div>
@@ -161,6 +200,26 @@ export function renderChatActive(
       </div>
     </div>
   `;
+
+  // --- Session Timer Logic ---
+  if (timerIntervalId) clearInterval(timerIntervalId);
+  if (session.sessionStartTime) {
+    const timerEl = container.querySelector("#sessionTimer") as HTMLElement;
+    const updateTimer = () => {
+      if (session.sessionStartTime) {
+        timerEl.textContent = `SESSION ${formatDuration(session.sessionStartTime)}`;
+      }
+    };
+    updateTimer();
+    timerIntervalId = setInterval(updateTimer, 1000);
+  }
+
+  // Toggle session info
+  const infoStrip = container.querySelector("#sessionInfoStrip") as HTMLElement;
+  const infoToggle = container.querySelector("#sessionInfoToggle") as HTMLElement;
+  infoToggle?.addEventListener("click", () => {
+    infoStrip.classList.toggle("collapsed");
+  });
 
   const messagesEl = container.querySelector("#chatMessages") as HTMLElement;
   const scrollBtn = container.querySelector("#scrollBottomBtn") as HTMLElement;

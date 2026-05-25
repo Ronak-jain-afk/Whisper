@@ -48,6 +48,8 @@ export class Session {
   abortReason: AbortReason | null = null;
   peerTyping = false;
   cryptoKey: CryptoKey | null = null;
+  peerConnected = false;
+  sessionStartTime: number | null = null;
 
   private stateChangeCbs: StateChangeCallback[] = [];
   private sasTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -151,11 +153,13 @@ export class Session {
       try {
         const result = await generateSasPhrase(conn);
         this.sas = result;
+        this.peerConnected = true;
         this.state.transition("SAS_VERIFY");
         this.notifyStateChange();
         this.startSasTimeout();
         this.startIdleDetection();
       } catch {
+        this.peerConnected = false;
         this.abortReason = "connection_lost";
         this.goAborted("connection_lost");
       }
@@ -245,11 +249,13 @@ export class Session {
     });
 
     conn.on("close", () => {
+      this.peerConnected = false;
       if (this.cleanedUp) return;
       this.goAborted("connection_lost");
     });
 
     conn.on("error", () => {
+      this.peerConnected = false;
       if (this.cleanedUp) return;
       this.goAborted("connection_lost");
     });
@@ -314,6 +320,7 @@ export class Session {
         // Encryption unavailable — messages sent in plaintext
       });
     }
+    this.sessionStartTime = Date.now();
     this.state.transition("CHAT_ACTIVE");
     this.notifyStateChange();
   }
@@ -454,6 +461,8 @@ export class Session {
     this.secret = null;
     this.sendTimestamps = [];
     this.peerTyping = false;
+    this.peerConnected = false;
+    this.sessionStartTime = null;
     this.state.reset();
     this.cleanedUp = false;
     this.notifyStateChange();
