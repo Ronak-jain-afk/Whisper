@@ -52,20 +52,23 @@ function escapeHtml(text: string): string {
 
 function renderMessage(m: { kind: string; text: string; sender: string; timestamp: number }): string {
   const time = new Date(m.timestamp).toLocaleTimeString();
+  const sentIcon = m.sender === "self"
+    ? `<svg class="sent-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+    : "";
   if (m.kind === "image") {
     return `
       <div class="chat-msg ${m.sender}">
         <div class="chat-bubble image">
           <img src="${escapeHtml(m.text)}" alt="Shared image" loading="lazy" />
         </div>
-        <span class="chat-time">${time}</span>
+        <span class="chat-time">${time}${sentIcon}</span>
       </div>
     `;
   }
   return `
     <div class="chat-msg ${m.sender}">
       <div class="chat-bubble">${escapeHtml(m.text)}</div>
-      <span class="chat-time">${time}</span>
+      <span class="chat-time">${time}${sentIcon}</span>
     </div>
   `;
 }
