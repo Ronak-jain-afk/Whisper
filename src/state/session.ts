@@ -176,21 +176,26 @@ export class Session {
     }
 
     conn.on("data", (data: unknown) => {
+      console.log("conn.data received", { data, type: typeof data, cleanedUp: this.cleanedUp, state: this.state.current });
       if (this.cleanedUp) return;
       if (typeof data !== "string") return;
 
       const processIncoming = (raw: string): void => {
+        console.log("processIncoming called", { raw: raw.slice(0, 100) });
         let parsed: { kind?: string; text?: string; data?: string; type?: string; name?: string; size?: number; enc?: string };
         try {
           parsed = JSON.parse(raw);
+          console.log("processIncoming parsed", { parsed, cryptoKey: !!this.cryptoKey, kind: parsed.kind, enc: parsed.enc ? "yes" : "no" });
         } catch {
           parsed = { kind: "text", text: raw };
+          console.log("processIncoming parse failed, treating as text", { raw: raw.slice(0, 100) });
         }
         if (parsed.enc && this.cryptoKey) {
           decrypt(this.cryptoKey, parsed.enc).then((decrypted) => {
+            console.log("decrypted message", { decrypted: decrypted.slice(0, 100) });
             processIncoming(decrypted);
-          }).catch(() => {
-            // Decryption failed — drop message
+          }).catch((e) => {
+            console.log("decryption failed, dropping", e);
           });
           return;
         }
@@ -350,6 +355,7 @@ export class Session {
   }
 
   sendMessage(text: string): void {
+    console.log("sendMessage called", { text, state: this.state.current, conn: !!this.conn, cleanedUp: this.cleanedUp });
     if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
     if (this.cleanedUp) return;
 
