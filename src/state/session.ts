@@ -8,6 +8,7 @@ import { PeerIdTakenError } from "../peer/errors";
 import { generateSasPhrase } from "../sas/generate";
 import { generateSecret } from "../utils/secret";
 import { copyToClipboard } from "../utils/clipboard";
+import { deriveKey, encrypt, decrypt } from "../crypto/keychain";
 
 export type AbortReason =
   | "sas_mismatch"
@@ -46,6 +47,7 @@ export class Session {
   sas: SasResult | null = null;
   abortReason: AbortReason | null = null;
   peerTyping = false;
+  cryptoKey: CryptoKey | null = null;
 
   private stateChangeCbs: StateChangeCallback[] = [];
   private sasTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -168,65 +170,78 @@ export class Session {
     conn.on("data", (data: unknown) => {
       if (this.cleanedUp) return;
       if (typeof data !== "string") return;
-      let parsed: { kind: string; text?: string; data?: string; type?: string; name?: string; size?: number };
-      try {
-        parsed = JSON.parse(data);
-      } catch {
-        parsed = { kind: "text", text: data };
-      }
-      if (parsed.kind === "control") {
-        if (parsed.type === "typing") {
-          this.peerTyping = true;
-          this.clearPeerTypingTimeout();
-          this.peerTypingTimeoutId = setTimeout(() => {
-            this.peerTyping = false;
-            this.peerTypingTimeoutId = null;
-            this.notifyStateChange();
-          }, TYPING_TIMEOUT_MS);
-          this.notifyStateChange();
+
+      const processIncoming = (raw: string): void => {
+        let parsed: { kind?: string; text?: string; data?: string; type?: string; name?: string; size?: number; enc?: string };
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = { kind: "text", text: raw };
         }
-        return;
-      }
-      if (parsed.kind === "file") {
-        const fileData = parsed.data ?? "";
-        if (fileData.length > MAX_FILE_SIZE) return;
-        const msg: Message = {
-          id: crypto.randomUUID(),
-          kind: "file",
-          text: fileData,
-          sender: "peer",
-          timestamp: Date.now(),
-          fileName: parsed.name ?? "file",
-          fileSize: parsed.size ?? fileData.length,
-        };
-        this.messages.push(msg);
-      } else if (parsed.kind === "image") {
-        const imgData = parsed.data ?? "";
-        if (imgData.length > MAX_IMAGE_SIZE) return;
-        const msg: Message = {
-          id: crypto.randomUUID(),
-          kind: "image",
-          text: imgData,
-          sender: "peer",
-          timestamp: Date.now(),
-        };
-        this.messages.push(msg);
-      } else {
-        const text = (parsed.text ?? "").slice(0, MAX_MSG_LENGTH);
-        if (!text) return;
-        const msg: Message = {
-          id: crypto.randomUUID(),
-          kind: "text",
-          text,
-          sender: "peer",
-          timestamp: Date.now(),
-        };
-        this.messages.push(msg);
-      }
-      if (this.messages.length > MAX_MESSAGES) {
-        this.messages.splice(0, this.messages.length - MAX_MESSAGES);
-      }
-      this.notifyStateChange();
+        if (parsed.enc && this.cryptoKey) {
+          decrypt(this.cryptoKey, parsed.enc).then((decrypted) => {
+            processIncoming(decrypted);
+          }).catch(() => {
+            // Decryption failed — drop message
+          });
+          return;
+        }
+        if (parsed.kind === "control") {
+          if (parsed.type === "typing") {
+            this.peerTyping = true;
+            this.clearPeerTypingTimeout();
+            this.peerTypingTimeoutId = setTimeout(() => {
+              this.peerTyping = false;
+              this.peerTypingTimeoutId = null;
+              this.notifyStateChange();
+            }, TYPING_TIMEOUT_MS);
+            this.notifyStateChange();
+          }
+          return;
+        }
+        if (parsed.kind === "file") {
+          const fileData = parsed.data ?? "";
+          if (fileData.length > MAX_FILE_SIZE) return;
+          const msg: Message = {
+            id: crypto.randomUUID(),
+            kind: "file",
+            text: fileData,
+            sender: "peer",
+            timestamp: Date.now(),
+            fileName: parsed.name ?? "file",
+            fileSize: parsed.size ?? fileData.length,
+          };
+          this.messages.push(msg);
+        } else if (parsed.kind === "image") {
+          const imgData = parsed.data ?? "";
+          if (imgData.length > MAX_IMAGE_SIZE) return;
+          const msg: Message = {
+            id: crypto.randomUUID(),
+            kind: "image",
+            text: imgData,
+            sender: "peer",
+            timestamp: Date.now(),
+          };
+          this.messages.push(msg);
+        } else {
+          const text = (parsed.text ?? "").slice(0, MAX_MSG_LENGTH);
+          if (!text) return;
+          const msg: Message = {
+            id: crypto.randomUUID(),
+            kind: "text",
+            text,
+            sender: "peer",
+            timestamp: Date.now(),
+          };
+          this.messages.push(msg);
+        }
+        if (this.messages.length > MAX_MESSAGES) {
+          this.messages.splice(0, this.messages.length - MAX_MESSAGES);
+        }
+        this.notifyStateChange();
+      };
+
+      processIncoming(data as string);
     });
 
     conn.on("close", () => {
@@ -292,6 +307,13 @@ export class Session {
   confirmSasMatch(): void {
     if (this.state.current !== "SAS_VERIFY") return;
     this.clearSasTimeout();
+    if (this.secret && !this.cryptoKey) {
+      deriveKey(this.secret).then((key) => {
+        this.cryptoKey = key;
+      }).catch(() => {
+        // Encryption unavailable — messages sent in plaintext
+      });
+    }
     this.state.transition("CHAT_ACTIVE");
     this.notifyStateChange();
   }
@@ -300,6 +322,20 @@ export class Session {
     if (this.state.current !== "SAS_VERIFY") return;
     this.clearSasTimeout();
     this.goAborted("sas_mismatch");
+  }
+
+  private sendEncrypted(jsonPayload: string): void {
+    const conn = this.conn;
+    if (!conn) return;
+    if (this.cryptoKey) {
+      encrypt(this.cryptoKey, jsonPayload).then((enc) => {
+        conn.send(JSON.stringify({ enc }));
+      }).catch(() => {
+        conn.send(jsonPayload);
+      });
+    } else {
+      conn.send(jsonPayload);
+    }
   }
 
   sendMessage(text: string): void {
@@ -328,7 +364,7 @@ export class Session {
     if (this.messages.length > MAX_MESSAGES) {
       this.messages.splice(0, this.messages.length - MAX_MESSAGES);
     }
-    this.conn.send(JSON.stringify({ kind: "text", text: truncated }));
+    this.sendEncrypted(JSON.stringify({ kind: "text", text: truncated }));
     this.notifyStateChange();
   }
 
@@ -355,14 +391,14 @@ export class Session {
     if (this.messages.length > MAX_MESSAGES) {
       this.messages.splice(0, this.messages.length - MAX_MESSAGES);
     }
-    this.conn.send(JSON.stringify({ kind: "image", data: dataUrl }));
+    this.sendEncrypted(JSON.stringify({ kind: "image", data: dataUrl }));
     this.notifyStateChange();
   }
 
   sendTyping(): void {
     if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
     if (this.cleanedUp) return;
-    this.conn.send(JSON.stringify({ kind: "control", type: "typing" }));
+    this.sendEncrypted(JSON.stringify({ kind: "control", type: "typing" }));
   }
 
   sendFile(name: string, dataUrl: string): void {
@@ -390,7 +426,7 @@ export class Session {
     if (this.messages.length > MAX_MESSAGES) {
       this.messages.splice(0, this.messages.length - MAX_MESSAGES);
     }
-    this.conn.send(JSON.stringify({ kind: "file", name, size: dataUrl.length, data: dataUrl }));
+    this.sendEncrypted(JSON.stringify({ kind: "file", name, size: dataUrl.length, data: dataUrl }));
     this.notifyStateChange();
   }
 
