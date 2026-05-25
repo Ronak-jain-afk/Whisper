@@ -54,14 +54,9 @@ function parseFingerprintFromSdp(sdp: string): string | null {
   return null;
 }
 
-async function extractFingerprint(
-  conn: DataConnection
-): Promise<{ hex: string; degraded: boolean }> {
-  const pc: RTCPeerConnection | null = (conn as any).peerConnection ?? null;
-  if (!pc) {
-    throw new Error("No peerConnection available on DataConnection");
-  }
-
+async function extractRemoteFingerprint(
+  pc: RTCPeerConnection
+): Promise<{ hex: string; degraded: boolean } | null> {
   try {
     const certs = await (pc as any).getRemoteCertificates();
     if (certs && certs.length > 0) {
@@ -84,25 +79,42 @@ async function extractFingerprint(
   }
 
   const sdp = pc.remoteDescription?.sdp;
-  if (!sdp) {
-    throw new Error("No remote SDP available for fingerprint fallback");
-  }
+  if (!sdp) return null;
 
   const fp = parseFingerprintFromSdp(sdp);
-  if (!fp) {
-    throw new Error(
-      "Could not extract fingerprint from remote SDP"
-    );
-  }
+  if (!fp) return null;
 
   return { hex: fp, degraded: true };
+}
+
+function extractLocalFingerprint(pc: RTCPeerConnection): string | null {
+  const sdp = pc.localDescription?.sdp;
+  if (!sdp) return null;
+  return parseFingerprintFromSdp(sdp);
 }
 
 export async function generateSasPhrase(
   conn: DataConnection
 ): Promise<{ phrase: string; degraded: boolean }> {
-  const { hex, degraded } = await extractFingerprint(conn);
-  const bytes = hexStringToBytes(hex);
+  const pc: RTCPeerConnection | null = (conn as any).peerConnection ?? null;
+  if (!pc) {
+    throw new Error("No peerConnection available on DataConnection");
+  }
+
+  const remote = await extractRemoteFingerprint(pc);
+  if (!remote) {
+    throw new Error("Could not extract remote fingerprint");
+  }
+
+  const localHex = extractLocalFingerprint(pc);
+  if (!localHex) {
+    throw new Error("Could not extract local fingerprint");
+  }
+
+  const [first, second] = [localHex, remote.hex].sort();
+  const combined = first + second;
+
+  const bytes = hexStringToBytes(combined);
   const phrase = sasFromBytes(bytes);
-  return { phrase, degraded };
+  return { phrase, degraded: remote.degraded };
 }

@@ -20,6 +20,7 @@ const EMOJIS = [
 
 let audioCtx: AudioContext | null = null;
 let lastNotifiedId: string | null = null;
+let searchTerm = "";
 
 function playNotificationSound(): void {
   try {
@@ -84,7 +85,19 @@ export function renderChatActive(
       <div class="chat-header">
         <span class="status-dot online"></span>
         <span class="chat-header-text serif">Secure Conversation</span>
-        <button id="copyChatBtn" class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.7rem;">Archive</button>
+        <div class="header-actions">
+          <button id="searchToggleBtn" class="btn-icon" title="Search messages">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+          <button id="copyChatBtn" class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.7rem;">Archive</button>
+        </div>
+      </div>
+      <div class="chat-search${searchTerm ? "" : ""}" id="chatSearch"${searchTerm ? "" : ' style="display:none"'}>
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="searchInput" type="text" placeholder="Search messages…" autocomplete="off" value="${escapeHtml(searchTerm)}" />
+        <button id="searchClearBtn" class="btn-icon" title="Clear search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
       <div class="chat-messages" id="chatMessages">
         ${messagesHtml}
@@ -130,6 +143,53 @@ export function renderChatActive(
 
   scrollBtn.addEventListener("click", () => {
     messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: "smooth" });
+  });
+
+  // Search
+  function applySearchFilter(): void {
+    const msgs = messagesEl.querySelectorAll<HTMLElement>(".chat-msg");
+    const term = searchTerm.toLowerCase();
+    msgs.forEach((msg) => {
+      const bubble = msg.querySelector(".chat-bubble");
+      const text = bubble?.textContent ?? "";
+      const match = !term || text.toLowerCase().includes(term);
+      msg.style.display = match ? "" : "none";
+    });
+  }
+
+  const searchContainer = container.querySelector("#chatSearch") as HTMLElement;
+  const searchInput = container.querySelector("#searchInput") as HTMLInputElement;
+  const searchClearBtn = container.querySelector("#searchClearBtn");
+  const searchToggleBtn = container.querySelector("#searchToggleBtn");
+
+  if (searchTerm) {
+    searchContainer.style.display = "flex";
+    applySearchFilter();
+  }
+
+  searchToggleBtn?.addEventListener("click", () => {
+    const isOpen = searchContainer.style.display !== "none";
+    if (isOpen) {
+      searchContainer.style.display = "none";
+      searchTerm = "";
+      searchInput.value = "";
+      applySearchFilter();
+    } else {
+      searchContainer.style.display = "flex";
+      searchInput.focus();
+    }
+  });
+
+  searchInput?.addEventListener("input", () => {
+    searchTerm = searchInput.value;
+    applySearchFilter();
+  });
+
+  searchClearBtn?.addEventListener("click", () => {
+    searchTerm = "";
+    searchInput.value = "";
+    applySearchFilter();
+    searchInput.focus();
   });
 
   // Notification sound for new peer messages
