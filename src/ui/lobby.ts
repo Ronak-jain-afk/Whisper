@@ -1,4 +1,5 @@
 import type { Session } from "../state/session";
+import { openQrScanner } from "./qr-scanner";
 
 export function renderLobby(
   container: HTMLElement,
@@ -16,7 +17,21 @@ export function renderLobby(
           <button id="createRoomBtn" class="btn-primary">Initiate Secure Room</button>
           <div class="lobby-divider"><span>Connection</span></div>
           <div class="lobby-join">
-            <input id="joinSecretInput" type="text" placeholder="Paste invitation secret" />
+            <div style="display:flex;gap:0.5rem;width:100%">
+              <input id="joinSecretInput" type="text" placeholder="Paste invitation secret" style="flex:1" />
+              <button id="qrScanBtn" class="btn-icon" title="Scan QR code" style="flex-shrink:0;width:3rem!important;height:3rem!important">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:1.2rem;height:1.2rem">
+                  <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+                  <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                  <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+                  <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                  <rect x="7" y="7" width="3" height="3"/>
+                  <rect x="14" y="7" width="3" height="3"/>
+                  <rect x="7" y="14" width="3" height="3"/>
+                  <rect x="14" y="14" width="3" height="3"/>
+                </svg>
+              </button>
+            </div>
             <button id="joinRoomBtn" class="btn-secondary">Join Room</button>
           </div>
         </div>
@@ -133,5 +148,19 @@ export function renderLobby(
         session.joinRoom(secret);
       }
     }
+  });
+
+  const qrBtn = container.querySelector("#qrScanBtn");
+  qrBtn?.addEventListener("click", () => {
+    openQrScanner(
+      (data) => {
+        const input = container.querySelector("#joinSecretInput") as HTMLInputElement | null;
+        if (input) {
+          input.value = data;
+          session.joinRoom(data);
+        }
+      },
+      () => {}
+    );
   });
 }

@@ -1,6 +1,11 @@
-const STUN: RTCIceServer[] = [
+const ICE: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
+  {
+    urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"],
+    username: "peerjs",
+    credential: "peerjsp",
+  },
 ];
 
 export interface RoomConn {
@@ -9,15 +14,11 @@ export interface RoomConn {
   close: () => void;
 }
 
-// Set SIGNALING_HOST to your Worker URL, or pass ?peerjs_host=<url> in the URL
-const SIGNALING_HOST = "";
+const SIGNALING_HOST = "whisper-signal.ronakjain4448.workers.dev";
 
 function signalingUrl(): string {
   const p = new URLSearchParams(window.location.search);
   const host = p.get("peerjs_host") || SIGNALING_HOST;
-  if (!host) {
-    throw new Error("Missing signaling host. Set ?peerjs_host= in URL or edit SIGNALING_HOST in src/signaling/connect.ts");
-  }
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const port = p.get("peerjs_port") ? `:${p.get("peerjs_port")}` : "";
   const path = p.get("peerjs_path") || "/";
@@ -45,7 +46,7 @@ export async function hostRoom(secret: string): Promise<RoomConn> {
   const ws = new WebSocket(`${signalingUrl()}/${secret}`);
   await wsOpen(ws);
 
-  const pc = new RTCPeerConnection({ iceServers: STUN });
+  const pc = new RTCPeerConnection({ iceServers: ICE });
   const dc = pc.createDataChannel("whisper", { ordered: true });
 
   ws.onmessage = async (event) => {
@@ -81,7 +82,7 @@ export async function joinRoom(secret: string): Promise<RoomConn> {
   const ws = new WebSocket(`${signalingUrl()}/${secret}`);
   await wsOpen(ws);
 
-  const pc = new RTCPeerConnection({ iceServers: STUN });
+  const pc = new RTCPeerConnection({ iceServers: ICE });
 
   const dcPromise = new Promise<RTCDataChannel>((resolve) => {
     pc.ondatachannel = (event) => resolve(event.channel);
