@@ -1,4 +1,3 @@
-import type { DataConnection } from "peerjs";
 import { WORDLIST } from "./wordlist";
 
 const FINGERPRINT_ALGORITHM = "sha-256";
@@ -94,13 +93,8 @@ function extractLocalFingerprint(pc: RTCPeerConnection): string | null {
 }
 
 export async function generateSasPhrase(
-  conn: DataConnection
+  pc: RTCPeerConnection
 ): Promise<{ phrase: string; degraded: boolean }> {
-  const pc: RTCPeerConnection | null = (conn as any).peerConnection ?? null;
-  if (!pc) {
-    throw new Error("No peerConnection available on DataConnection");
-  }
-
   const remote = await extractRemoteFingerprint(pc);
   if (!remote) {
     throw new Error("Could not extract remote fingerprint");

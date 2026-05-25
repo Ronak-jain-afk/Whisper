@@ -1,10 +1,7 @@
-import type Peer from "peerjs";
-import type { DataConnection } from "peerjs";
 import { StateMachine } from "./machine";
 import type { AppState, Message } from "./types";
-import { hostRoom } from "../peer/host";
-import { joinRoom } from "../peer/joiner";
-import { PeerIdTakenError } from "../peer/errors";
+import { hostRoom, joinRoom } from "../signaling/connect";
+import type { RoomConn } from "../signaling/connect";
 import { generateSasPhrase } from "../sas/generate";
 import { generateSecret } from "../utils/secret";
 import { copyToClipboard } from "../utils/clipboard";
@@ -41,8 +38,9 @@ export class Session {
   readonly state = new StateMachine("LOBBY");
   readonly messages: Message[] = [];
 
-  peer: Peer | null = null;
-  conn: DataConnection | null = null;
+  pc: RTCPeerConnection | null = null;
+  dc: RTCDataChannel | null = null;
+  private roomConn: RoomConn | null = null;
   secret: string | null = null;
   sas: SasResult | null = null;
   abortReason: AbortReason | null = null;
@@ -90,21 +88,18 @@ export class Session {
     this.startConnectTimeout();
 
     hostRoom(secret)
-      .then(({ peer, conn }) => {
-        this.peer = peer;
-        this.conn = conn;
+      .then((room) => {
+        this.roomConn = room;
+        this.pc = room.pc;
+        this.dc = room.dc;
         this.clearConnectTimeout();
-        this.wireConnection(conn);
+        this.wireConnection(room.pc, room.dc);
       })
       .catch((err) => {
         this.clearConnectTimeout();
         this.errorDetail = err instanceof Error ? err.message : String(err);
-        if (err instanceof PeerIdTakenError) {
-          this.abortReason = "id_taken";
-        } else {
-          this.abortReason = "connection_lost";
-        }
-        this.goAborted(this.abortReason);
+        this.abortReason = "connection_lost";
+        this.goAborted("connection_lost");
       });
   }
 
@@ -119,11 +114,12 @@ export class Session {
     this.startConnectTimeout();
 
     joinRoom(secret)
-      .then(({ peer, conn }) => {
-        this.peer = peer;
-        this.conn = conn;
+      .then((room) => {
+        this.roomConn = room;
+        this.pc = room.pc;
+        this.dc = room.dc;
         this.clearConnectTimeout();
-        this.wireConnection(conn);
+        this.wireConnection(room.pc, room.dc);
       })
       .catch((err) => {
         this.clearConnectTimeout();
@@ -152,10 +148,10 @@ export class Session {
     }
   }
 
-  private wireConnection(conn: DataConnection): void {
+  private wireConnection(pc: RTCPeerConnection, dc: RTCDataChannel): void {
     const onOpen = async () => {
       try {
-        const result = await generateSasPhrase(conn);
+        const result = await generateSasPhrase(pc);
         this.sas = result;
         this.peerConnected = true;
         this.state.transition("SAS_VERIFY");
@@ -169,33 +165,28 @@ export class Session {
       }
     };
 
-    if (conn.open) {
+    if (dc.readyState === "open") {
       onOpen();
     } else {
-      conn.on("open", onOpen);
+      dc.onopen = onOpen;
     }
 
-    conn.on("data", (data: unknown) => {
-      console.log("conn.data received", { data, type: typeof data, cleanedUp: this.cleanedUp, state: this.state.current });
+    dc.onmessage = (event: MessageEvent) => {
       if (this.cleanedUp) return;
-      if (typeof data !== "string") return;
+      if (typeof event.data !== "string") return;
 
       const processIncoming = (raw: string): void => {
-        console.log("processIncoming called", { raw: raw.slice(0, 100) });
         let parsed: { kind?: string; text?: string; data?: string; type?: string; name?: string; size?: number; enc?: string };
         try {
           parsed = JSON.parse(raw);
-          console.log("processIncoming parsed", { parsed, cryptoKey: !!this.cryptoKey, kind: parsed.kind, enc: parsed.enc ? "yes" : "no" });
         } catch {
           parsed = { kind: "text", text: raw };
-          console.log("processIncoming parse failed, treating as text", { raw: raw.slice(0, 100) });
         }
         if (parsed.enc && this.cryptoKey) {
           decrypt(this.cryptoKey, parsed.enc).then((decrypted) => {
-            console.log("decrypted message", { decrypted: decrypted.slice(0, 100) });
             processIncoming(decrypted);
-          }).catch((e) => {
-            console.log("decryption failed, dropping", e);
+          }).catch(() => {
+            // Decryption failed — drop message
           });
           return;
         }
@@ -254,20 +245,20 @@ export class Session {
         this.notifyStateChange();
       };
 
-      processIncoming(data as string);
-    });
+      processIncoming(event.data as string);
+    };
 
-    conn.on("close", () => {
+    dc.onclose = () => {
       this.peerConnected = false;
       if (this.cleanedUp) return;
       this.goAborted("connection_lost");
-    });
+    };
 
-    conn.on("error", () => {
+    dc.onerror = () => {
       this.peerConnected = false;
       if (this.cleanedUp) return;
       this.goAborted("connection_lost");
-    });
+    };
   }
 
   private startSasTimeout(): void {
@@ -341,22 +332,21 @@ export class Session {
   }
 
   private sendEncrypted(jsonPayload: string): void {
-    const conn = this.conn;
-    if (!conn) return;
+    const dc = this.dc;
+    if (!dc || dc.readyState !== "open") return;
     if (this.cryptoKey) {
       encrypt(this.cryptoKey, jsonPayload).then((enc) => {
-        conn.send(JSON.stringify({ enc }));
+        try { dc.send(JSON.stringify({ enc })); } catch { }
       }).catch(() => {
-        conn.send(jsonPayload);
+        try { dc.send(jsonPayload); } catch { }
       });
     } else {
-      conn.send(jsonPayload);
+      try { dc.send(jsonPayload); } catch { }
     }
   }
 
   sendMessage(text: string): void {
-    console.log("sendMessage called", { text, state: this.state.current, conn: !!this.conn, cleanedUp: this.cleanedUp });
-    if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
+    if (!this.dc || this.state.current !== "CHAT_ACTIVE") return;
     if (this.cleanedUp) return;
 
     const trimmed = text.trim();
@@ -386,7 +376,7 @@ export class Session {
   }
 
   sendImage(dataUrl: string): void {
-    if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
+    if (!this.dc || this.state.current !== "CHAT_ACTIVE") return;
     if (this.cleanedUp) return;
     if (dataUrl.length > MAX_IMAGE_SIZE) return;
 
@@ -413,13 +403,13 @@ export class Session {
   }
 
   sendTyping(): void {
-    if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
+    if (!this.dc || this.state.current !== "CHAT_ACTIVE") return;
     if (this.cleanedUp) return;
     this.sendEncrypted(JSON.stringify({ kind: "control", type: "typing" }));
   }
 
   sendFile(name: string, dataUrl: string): void {
-    if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
+    if (!this.dc || this.state.current !== "CHAT_ACTIVE") return;
     if (this.cleanedUp) return;
     if (dataUrl.length > MAX_FILE_SIZE) return;
 
@@ -495,15 +485,9 @@ export class Session {
   }
 
   private cleanup(): void {
-    const conn = this.conn;
-    const peer = this.peer;
-    this.conn = null;
-    this.peer = null;
-    if (conn) {
-      try { conn.close(); } catch { /* ignore */ }
-    }
-    if (peer) {
-      try { peer.destroy(); } catch { /* ignore */ }
-    }
+    this.roomConn?.close();
+    this.roomConn = null;
+    this.pc = null;
+    this.dc = null;
   }
 }
