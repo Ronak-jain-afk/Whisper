@@ -117,7 +117,7 @@ export function renderChatActive(
           <button id="searchToggleBtn" class="btn-icon" title="Search messages">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </button>
-          <button id="copyChatBtn" class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.7rem;">Archive</button>
+          <button id="copyChatBtn" class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.7rem;">Copy</button>
         </div>
       </div>
       <div class="chat-search${searchTerm ? "" : ""}" id="chatSearch"${searchTerm ? "" : ' style="display:none"'}>
@@ -342,8 +342,13 @@ export function renderChatActive(
     reader.readAsDataURL(file);
   });
 
-  container.querySelector("#copyChatBtn")?.addEventListener("click", () => {
-    session.copyConversation().catch(() => {});
+  const copyBtn = container.querySelector("#copyChatBtn") as HTMLElement;
+  copyBtn?.addEventListener("click", () => {
+    session.copyConversation().then(() => {
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+    }).catch(() => {});
   });
 
   // File upload

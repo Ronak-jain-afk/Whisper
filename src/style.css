@@ -192,36 +192,45 @@ input::placeholder {
 }
 
 /* ---- LOBBY ---- */
+.screen.lobby {
+  display: block;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  padding: 0;
+  width: 100%;
+}
 
-.lobby {
+.lobby-main {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.lobby-manual {
+  padding: 0 2rem 10rem 2rem;
   max-width: 800px;
   margin: 0 auto;
 }
 
 .lobby-hero {
-  border: 4px solid var(--text);
-  padding: 3rem 2rem;
-  margin-bottom: 3rem;
-  background: var(--surface);
+  padding: 0;
+  margin-bottom: 1.5rem;
+  background: transparent;
   position: relative;
 }
 
-.lobby-hero::before {
-  content: "ENCRYPTED_VOICE";
-  position: absolute;
-  top: -12px;
-  left: 20px;
-  background: var(--bg);
-  padding: 0 10px;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--accent);
-}
-
 .lobby-title {
-  font-size: 6rem;
-  line-height: 0.9;
-  margin-bottom: 1rem;
+  font-family: var(--font-sans); /* Chakra Petch */
+  font-weight: 700;
+  font-size: 6.5rem;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.03em;
   color: var(--text);
 }
 
@@ -245,9 +254,11 @@ input::placeholder {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  color: var(--text-muted);
+  color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.85rem;
+  font-weight: bold;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -255,8 +266,8 @@ input::placeholder {
 .lobby-divider::after {
   content: "";
   flex: 1;
-  height: 2px;
-  background: var(--border);
+  height: 4px;
+  background: var(--text);
 }
 
 .lobby-join {
@@ -281,10 +292,31 @@ input::placeholder {
   align-items: center;
   gap: 1rem;
   background: var(--surface);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.feature-item:hover {
+  border-color: var(--text);
+}
+
+.feature-item.active {
+  border-color: var(--accent);
+  background: #0a0a0a;
+  box-shadow: inset 0 0 10px rgba(204, 255, 0, 0.05);
+}
+
+.feature-item.active .feature-label {
+  color: var(--accent);
+}
+
+.feature-item.active .feature-icon {
+  color: var(--accent);
 }
 
 .feature-icon {
-  color: var(--accent);
+  color: var(--text-muted);
+  transition: var(--transition-fast);
 }
 
 .feature-icon svg {
@@ -296,7 +328,58 @@ input::placeholder {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   text-transform: uppercase;
+  color: var(--text-muted);
+  transition: var(--transition-fast);
+}
+
+/* ---- LOBBY MANUAL ---- */
+
+.lobby-manual {
+  padding: 0 2rem 10rem 2rem;
+}
+
+.manual-section {
+  position: relative;
+  padding: 8rem 0;
+  border-top: 4px solid var(--text);
+  text-align: left;
+}
+
+.manual-header {
+  font-size: 3rem;
+  margin-bottom: 2rem;
+  position: relative;
+  z-index: 2;
   color: var(--text);
+}
+
+.manual-body {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  line-height: 1.8;
+  color: var(--text-muted);
+  max-width: 650px;
+  position: relative;
+  z-index: 2;
+}
+
+.manual-body strong {
+  color: var(--accent);
+  font-weight: normal;
+}
+
+.numeral {
+  position: absolute;
+  top: 2rem;
+  right: 0;
+  font-family: var(--font-display);
+  font-size: 18rem;
+  font-weight: 800;
+  color: var(--text);
+  opacity: 0.04;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* ---- AWAITING PEER ---- */
@@ -435,15 +518,28 @@ input::placeholder {
   margin: 0 auto;
 }
 
-/* Brutalist Scrollbar */
+/* Brutalist Scrollbar - Global */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--bg);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 1px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
 .chat-messages::-webkit-scrollbar {
-  width: 10px;
-}
-.chat-messages::-webkit-scrollbar-track {
-  background: var(--surface);
-}
-.chat-messages::-webkit-scrollbar-thumb {
-  background: var(--text);
+  width: 6px;
 }
 
 .chat-msg {
