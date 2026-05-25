@@ -46,6 +46,7 @@ export class Session {
   secret: string | null = null;
   sas: SasResult | null = null;
   abortReason: AbortReason | null = null;
+  errorDetail: string | null = null;
   peerTyping = false;
   cryptoKey: CryptoKey | null = null;
   peerConnected = false;
@@ -97,6 +98,7 @@ export class Session {
       })
       .catch((err) => {
         this.clearConnectTimeout();
+        this.errorDetail = err instanceof Error ? err.message : String(err);
         if (err instanceof PeerIdTakenError) {
           this.abortReason = "id_taken";
         } else {
@@ -123,8 +125,9 @@ export class Session {
         this.clearConnectTimeout();
         this.wireConnection(conn);
       })
-      .catch(() => {
+      .catch((err) => {
         this.clearConnectTimeout();
+        this.errorDetail = err instanceof Error ? err.message : String(err);
         this.abortReason = "connection_lost";
         this.goAborted("connection_lost");
       });
@@ -134,7 +137,8 @@ export class Session {
     this.clearConnectTimeout();
     this.connectTimeoutId = setTimeout(() => {
       if (this.cleanedUp || this.state.current === "ABORTED") return;
-      this.abortReason = "connection_lost";
+      this.errorDetail = "Timed out waiting for peer to connect (30s)";
+      this.abortReason = "timeout";
       this.cleanup();
       this.state.transition("ABORTED");
       this.notifyStateChange();
@@ -458,6 +462,7 @@ export class Session {
     this.messages.length = 0;
     this.sas = null;
     this.abortReason = null;
+    this.errorDetail = null;
     this.secret = null;
     this.sendTimestamps = [];
     this.peerTyping = false;

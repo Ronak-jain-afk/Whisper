@@ -17,10 +17,15 @@ export function renderAborted(
   const reason = session.abortReason ?? "connection_lost";
   const message = REASON_MESSAGES[reason];
 
+  const detail = session.errorDetail
+    ? `<p class="aborted-detail">${session.errorDetail}</p>`
+    : "";
+
   container.innerHTML = `
     <div class="screen aborted">
       <div class="aborted-icon serif">End</div>
       <p class="aborted-text serif" style="font-size: 1.2rem; color: var(--text);">${message}</p>
+      ${detail}
       <button id="backToLobbyBtn" class="btn-primary" style="margin-top: 1.5rem;">Begin Anew</button>
     </div>
   `;

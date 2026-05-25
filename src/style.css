@@ -1003,6 +1003,15 @@ input::placeholder {
   color: var(--danger);
 }
 
+.aborted-detail {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  max-width: 28rem;
+  text-align: center;
+  word-break: break-all;
+}
+
 /* ---- Spinner ---- */
 
 .spinner {
