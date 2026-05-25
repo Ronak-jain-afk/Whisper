@@ -21,6 +21,7 @@ const EMOJIS = [
 let audioCtx: AudioContext | null = null;
 let lastNotifiedId: string | null = null;
 let searchTerm = "";
+let typingDebounceId: ReturnType<typeof setTimeout> | null = null;
 
 function playNotificationSound(): void {
   try {
@@ -51,7 +52,13 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-function renderMessage(m: { kind: string; text: string; sender: string; timestamp: number }): string {
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderMessage(m: { id: string; kind: string; text: string; sender: string; timestamp: number; fileName?: string; fileSize?: number }): string {
   const time = new Date(m.timestamp).toLocaleTimeString();
   const sentIcon = m.sender === "self"
     ? `<svg class="sent-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
@@ -61,6 +68,27 @@ function renderMessage(m: { kind: string; text: string; sender: string; timestam
       <div class="chat-msg ${m.sender}">
         <div class="chat-bubble image">
           <img src="${escapeHtml(m.text)}" alt="Shared image" loading="lazy" />
+        </div>
+        <span class="chat-time">${time}${sentIcon}</span>
+      </div>
+    `;
+  }
+  if (m.kind === "file") {
+    const name = escapeHtml(m.fileName ?? "file");
+    const size = formatFileSize(m.fileSize ?? 0);
+    return `
+      <div class="chat-msg ${m.sender}">
+        <div class="chat-bubble file" data-file-id="${escapeHtml(m.id)}">
+          <div class="file-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </div>
+          <div class="file-info">
+            <div class="file-name">${name}</div>
+            <div class="file-meta">${size}</div>
+          </div>
+          <button class="file-download-btn" data-file-id="${escapeHtml(m.id)}" title="Download">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
         </div>
         <span class="chat-time">${time}${sentIcon}</span>
       </div>
@@ -105,6 +133,12 @@ export function renderChatActive(
       <button id="scrollBottomBtn" class="scroll-bottom-btn" style="display:none" title="Scroll to bottom">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
       </button>
+      <div class="typing-indicator" id="typingIndicator"${session.peerTyping ? "" : ' style="display:none"'}>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-text">Peer is typing…</span>
+      </div>
       <div class="chat-input-row">
         <div class="emoji-panel" id="emojiPanel" style="display:none">
           ${EMOJIS.map(e => `<button class="emoji-option" data-emoji="${e}">${e}</button>`).join("")}
@@ -116,10 +150,14 @@ export function renderChatActive(
           <button id="imageBtn" class="btn-icon" title="Send image">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </button>
+          <button id="fileBtn" class="btn-icon" title="Send file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          </button>
           <input id="chatInput" type="text" placeholder="Whisper something…" autocomplete="off" />
           <button id="sendBtn" class="btn-primary" style="padding: 0.6rem 1.2rem;">Send</button>
         </div>
         <input id="imageInput" type="file" accept="image/*" style="display:none" />
+        <input id="fileInput" type="file" style="display:none" />
       </div>
     </div>
   `;
@@ -218,6 +256,16 @@ export function renderChatActive(
     if (e.key === "Enter") send();
   });
 
+  input.addEventListener("input", () => {
+    if (typingDebounceId !== null) {
+      clearTimeout(typingDebounceId);
+    }
+    typingDebounceId = setTimeout(() => {
+      typingDebounceId = null;
+      session.sendTyping();
+    }, 2000);
+  });
+
   // Emoji panel toggle
   const emojiBtn = container.querySelector("#emojiBtn");
   const emojiPanel = container.querySelector("#emojiPanel") as HTMLElement;
@@ -297,4 +345,48 @@ export function renderChatActive(
   container.querySelector("#copyChatBtn")?.addEventListener("click", () => {
     session.copyConversation().catch(() => {});
   });
+
+  // File upload
+  const fileBtn = container.querySelector("#fileBtn");
+  const fileInput = container.querySelector("#fileInput") as HTMLInputElement;
+
+  fileBtn?.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      session.sendFile(file.name, dataUrl);
+      fileInput.value = "";
+    };
+    reader.onerror = () => {
+      fileInput.value = "";
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // File download (delegated)
+  messagesEl.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest(".file-download-btn");
+    if (!btn) return;
+    const id = btn.getAttribute("data-file-id");
+    if (!id) return;
+    const msg = session.messages.find((m) => m.id === id);
+    if (!msg || msg.kind !== "file") return;
+    downloadFile(msg.text, msg.fileName ?? "file");
+  });
+
+  function downloadFile(dataUrl: string, fileName: string): void {
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 }

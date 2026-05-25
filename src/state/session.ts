@@ -30,9 +30,11 @@ const MAX_MSG_RATE = 10;
 const RATE_WINDOW_MS = 1000;
 const MAX_MSG_LENGTH = 10_000;
 const MAX_IMAGE_SIZE = 50_000;
+const MAX_FILE_SIZE = 250_000;
 const MAX_MESSAGES = 500;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const CONNECT_TIMEOUT_MS = 30_000;
+const TYPING_TIMEOUT_MS = 3_000;
 
 export class Session {
   readonly state = new StateMachine("LOBBY");
@@ -43,6 +45,7 @@ export class Session {
   secret: string | null = null;
   sas: SasResult | null = null;
   abortReason: AbortReason | null = null;
+  peerTyping = false;
 
   private stateChangeCbs: StateChangeCallback[] = [];
   private sasTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -50,6 +53,7 @@ export class Session {
   private sendTimestamps: number[] = [];
   private hiddenSince: number | null = null;
   private cleanedUp = false;
+  private peerTypingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   onStateChange(cb: StateChangeCallback): void {
     this.stateChangeCbs.push(cb);
@@ -164,13 +168,39 @@ export class Session {
     conn.on("data", (data: unknown) => {
       if (this.cleanedUp) return;
       if (typeof data !== "string") return;
-      let parsed: { kind: string; text?: string; data?: string };
+      let parsed: { kind: string; text?: string; data?: string; type?: string; name?: string; size?: number };
       try {
         parsed = JSON.parse(data);
       } catch {
         parsed = { kind: "text", text: data };
       }
-      if (parsed.kind === "image") {
+      if (parsed.kind === "control") {
+        if (parsed.type === "typing") {
+          this.peerTyping = true;
+          this.clearPeerTypingTimeout();
+          this.peerTypingTimeoutId = setTimeout(() => {
+            this.peerTyping = false;
+            this.peerTypingTimeoutId = null;
+            this.notifyStateChange();
+          }, TYPING_TIMEOUT_MS);
+          this.notifyStateChange();
+        }
+        return;
+      }
+      if (parsed.kind === "file") {
+        const fileData = parsed.data ?? "";
+        if (fileData.length > MAX_FILE_SIZE) return;
+        const msg: Message = {
+          id: crypto.randomUUID(),
+          kind: "file",
+          text: fileData,
+          sender: "peer",
+          timestamp: Date.now(),
+          fileName: parsed.name ?? "file",
+          fileSize: parsed.size ?? fileData.length,
+        };
+        this.messages.push(msg);
+      } else if (parsed.kind === "image") {
         const imgData = parsed.data ?? "";
         if (imgData.length > MAX_IMAGE_SIZE) return;
         const msg: Message = {
@@ -224,6 +254,13 @@ export class Session {
     if (this.sasTimeoutId !== null) {
       clearTimeout(this.sasTimeoutId);
       this.sasTimeoutId = null;
+    }
+  }
+
+  private clearPeerTypingTimeout(): void {
+    if (this.peerTypingTimeoutId !== null) {
+      clearTimeout(this.peerTypingTimeoutId);
+      this.peerTypingTimeoutId = null;
     }
   }
 
@@ -322,12 +359,47 @@ export class Session {
     this.notifyStateChange();
   }
 
+  sendTyping(): void {
+    if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
+    if (this.cleanedUp) return;
+    this.conn.send(JSON.stringify({ kind: "control", type: "typing" }));
+  }
+
+  sendFile(name: string, dataUrl: string): void {
+    if (!this.conn || this.state.current !== "CHAT_ACTIVE") return;
+    if (this.cleanedUp) return;
+    if (dataUrl.length > MAX_FILE_SIZE) return;
+
+    const now = Date.now();
+    this.sendTimestamps = this.sendTimestamps.filter(
+      (t) => now - t < RATE_WINDOW_MS
+    );
+    if (this.sendTimestamps.length >= MAX_MSG_RATE) return;
+    this.sendTimestamps.push(now);
+
+    const msg: Message = {
+      id: crypto.randomUUID(),
+      kind: "file",
+      text: dataUrl,
+      sender: "self",
+      timestamp: now,
+      fileName: name,
+      fileSize: dataUrl.length,
+    };
+    this.messages.push(msg);
+    if (this.messages.length > MAX_MESSAGES) {
+      this.messages.splice(0, this.messages.length - MAX_MESSAGES);
+    }
+    this.conn.send(JSON.stringify({ kind: "file", name, size: dataUrl.length, data: dataUrl }));
+    this.notifyStateChange();
+  }
+
   async copyConversation(): Promise<boolean> {
     const text = this.messages
       .map((m) => {
         const label = m.sender === "self" ? "You" : "Peer";
         const time = new Date(m.timestamp).toLocaleTimeString();
-        const content = m.kind === "image" ? "[Image]" : m.text;
+        const content = m.kind === "image" ? "[Image]" : m.kind === "file" ? `[File: ${m.fileName ?? "unknown"}]` : m.text;
         return `[${time}] ${label}: ${content}`;
       })
       .join("\n");
@@ -337,6 +409,7 @@ export class Session {
   reset(): void {
     this.clearConnectTimeout();
     this.clearSasTimeout();
+    this.clearPeerTypingTimeout();
     this.stopIdleDetection();
     this.cleanup();
     this.messages.length = 0;
@@ -344,6 +417,7 @@ export class Session {
     this.abortReason = null;
     this.secret = null;
     this.sendTimestamps = [];
+    this.peerTyping = false;
     this.state.reset();
     this.cleanedUp = false;
     this.notifyStateChange();
@@ -354,7 +428,9 @@ export class Session {
     this.cleanedUp = true;
     this.clearConnectTimeout();
     this.clearSasTimeout();
+    this.clearPeerTypingTimeout();
     this.stopIdleDetection();
+    this.peerTyping = false;
     this.abortReason = reason;
     this.cleanup();
     this.messages.length = 0;

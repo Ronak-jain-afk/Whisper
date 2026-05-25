@@ -5,7 +5,7 @@ export type AppState =
   | "CHAT_ACTIVE"
   | "ABORTED";
 
-export type MessageKind = "text" | "image";
+export type MessageKind = "text" | "image" | "file";
 
 export interface Message {
   id: string;
@@ -13,4 +13,6 @@ export interface Message {
   text: string;
   sender: "self" | "peer";
   timestamp: number;
+  fileName?: string;
+  fileSize?: number;
 }
