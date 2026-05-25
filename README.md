@@ -8,21 +8,30 @@ Everything lives in memory. Close the tab and it's gone.
 
 1. One person creates a room. The app generates a random 128-bit secret.
 2. That secret is shared with the other person -- copy-paste, QR code, however you want.
-3. PeerJS handles the signaling handshake through its public broker. Once that's done, the two browsers connect directly.
-4. Both sides independently compute a 4-word phrase from the DTLS fingerprint. You compare these out of band (call, text, in person) to make sure no one is in the middle.
-5. If the phrases match, the chat unlocks. All messages go over the WebRTC data channel encrypted with DTLS. No server touches them.
+3. PeerJS handles the signaling handshake through its public broker. Once that's done, the two browsers connect directly over WebRTC DTLS.
+4. Both sides independently compute a 4-word SAS phrase from both peers' DTLS certificate fingerprints. You compare these out of band (call, text, in person) to catch MITM.
+5. If the phrases match, the chat unlocks. An AES-256-GCM key is derived from the room secret via PBKDF2, and all subsequent messages are encrypted end-to-end before they ever touch the DataChannel.
 
-## What's here
+## Features
 
-The project is in active development. Current features:
-
-- Room creation and joining with a shared secret
+- Room creation and joining with a 128-bit shared secret
 - QR code sharing for the secret
-- SAS verification with BIP39 wordlist (4 words, 44 bits of fingerprint)
-- Text and image messaging over the encrypted channel
+- SAS verification with BIP39 wordlist (4 words, 44 bits from both certificates)
+- Text, image, and file messaging over the encrypted channel
+- Image upload auto-resizes and compresses (max 400px, JPEG quality 0.4)
+- File sharing up to 250 KB per file (any type)
+- E2E encryption with AES-256-GCM + PBKDF2 (key derived from room secret)
+- Emoji picker (32 emojis, cursor-aware insertion)
+- Message search (live text filter, case-insensitive)
+- Scroll-to-bottom button
+- Sent indicator (checkmark on self messages)
+- Typing indicator (animated dots)
+- Notification sound on new peer messages (Web Audio API, 800 Hz chime)
+- Copy conversation to clipboard with confirmation
 - Rate limiting (10 messages per second)
 - Idle timeout (30 minutes of hidden tab) and SAS timeout (5 minutes)
-- Firefox works -- uses SDP fingerprint fallback when certificate APIs aren't available
+- Connection timeout (30 seconds)
+- Firefox support (SDP fingerprint fallback when certificate APIs are unavailable)
 
 ## Running it
 
@@ -35,11 +44,20 @@ npm run preview   # preview the production build
 
 ## Deploying
 
-It's a static site. Drop `dist/` on Netlify, GitHub Pages, or any static host. A `netlify.toml` is included with security headers if you want to use Netlify directly.
+### Cloudflare Pages
+
+1. Push the repo to GitHub.
+2. In the Cloudflare Dashboard, go to **Workers & Pages** > **Create** > **Pages** > **Connect to Git**.
+3. Select your repo, set the build command to `npm run build` and the build output directory to `dist`.
+4. Deploy. Security headers are configured in `public/_headers`.
+
+### Other static hosts
+
+It's a static site. Drop `dist/` on any static host (Netlify, Vercel, GitHub Pages). No server-side config needed.
 
 ## What the signaling server sees
 
-The PeerJS public broker sees IP addresses, timing, and the room identifier. It does not see message content (DTLS prevents that) and it cannot silently intercept the connection (SAS verification catches MITM). This is fine for a personal project. If you need stronger guarantees, you can swap in a self-hosted PeerJS server or a Nostr relay.
+The PeerJS public broker sees IP addresses, timing, and the room identifier. It does not see message content (DTLS + E2E AES-GCM encryption prevent that) and it cannot silently intercept the connection (SAS verification catches MITM). This is fine for a personal project. If you need stronger guarantees, you can swap in a self-hosted PeerJS server or a Nostr relay.
 
 ## Browser support
 
