@@ -1,20 +1,38 @@
-const ICE: RTCIceServer[] = [
+const FALLBACK_ICE: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  {
-    urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"],
-    username: "peerjs",
-    credential: "peerjsp",
-  },
 ];
+
+let cachedTurnIce: RTCIceServer[] | null = null;
+
+async function fetchTurnIce(): Promise<RTCIceServer[]> {
+  if (cachedTurnIce) return cachedTurnIce;
+  try {
+    const res = await fetch(
+      `https://${SIGNALING_HOST}/turn-credentials`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return FALLBACK_ICE;
+    const data = (await res.json()) as { iceServers: RTCIceServer[] };
+    if (data.iceServers && data.iceServers.length > 0) {
+      cachedTurnIce = data.iceServers;
+      return data.iceServers;
+    }
+  } catch { /* TURN unavailable, use fallback */ }
+  return FALLBACK_ICE;
+}
+
+function makePc(ice: RTCIceServer[]): RTCPeerConnection {
+  return new RTCPeerConnection({ iceServers: ice });
+}
+
+const SIGNALING_HOST = "whisper-signal.ronakjain4448.workers.dev";
 
 export interface RoomConn {
   pc: RTCPeerConnection;
   dc: RTCDataChannel;
   close: () => void;
 }
-
-const SIGNALING_HOST = "whisper-signal.ronakjain4448.workers.dev";
 
 function signalingUrl(): string {
   const p = new URLSearchParams(window.location.search);
@@ -46,7 +64,8 @@ export async function hostRoom(secret: string): Promise<RoomConn> {
   const ws = new WebSocket(`${signalingUrl()}/${secret}`);
   await wsOpen(ws);
 
-  const pc = new RTCPeerConnection({ iceServers: ICE });
+  const iceServers = await fetchTurnIce();
+  const pc = makePc(iceServers);
   const dc = pc.createDataChannel("whisper", { ordered: true });
 
   ws.onmessage = async (event) => {
@@ -82,7 +101,8 @@ export async function joinRoom(secret: string): Promise<RoomConn> {
   const ws = new WebSocket(`${signalingUrl()}/${secret}`);
   await wsOpen(ws);
 
-  const pc = new RTCPeerConnection({ iceServers: ICE });
+  const iceServers = await fetchTurnIce();
+  const pc = makePc(iceServers);
 
   const dcPromise = new Promise<RTCDataChannel>((resolve) => {
     pc.ondatachannel = (event) => resolve(event.channel);
